@@ -6,6 +6,128 @@ Compulsory schooling mandate of Turkey has been increased from 8 to 12 years in 
 
 ## Literature Review
 
-\<Joel\>
+The theory behind the possible impact of compulsory education on wages is the human capital theory, which suggests that individuals enhance their productivity by acquiring knowledge and skills through schooling and training (Schultz, 1961; Becker, 1962; Mincer, 1974).
+
+There is a not very big number of research carried out describing the association of compulsory education and individual earnings. However, the relationship between these variables has been studied since a long time ago. It is possible to mention the work of Angrist and Krueger (1991) where they use compulsory schooling laws to estimate their causal impact on earnings. Furthermore, Harmon and Walker (1995) carried out a similar study but based in the United Kingdom example, and obtaining positive important results for the implementation of compulsory schooling. Subsequently, Oreopoulos (2006) extended the research over the Unite Kingdom and added to the analysis the cases of the United States, Canada and Ireland, achieving similar results. Moreover, it is possible to mention the study of Pischke and Von Wachter (2008) where they examined the impact of an additional year of compulsory schooling on wages in Germany. However, the results do not align with the obtained in the aforementioned studies, yet the authors adjudicate this with the particularities of the German case. Finally, Fang et al. (2012) also carried out the same exercise but in China obtaining more encouraging results than the other mentioned studies. However, this time the authors identify the impact of other aspect, particularly the rapid economic transformation and increased demand for educated labour force in the country.
 
 ## Data Cleaning and Formatting
+
+```{r}
+
+# Clear workspace
+rm(list = ls())
+
+# Import data using haven package for reading Stata files
+library(haven)
+library(dplyr)
+
+# Read 2021 data
+data_2021 <- read_dta("data/dta/data_2021.dta")
+
+# Convert cinsiyet to numeric if it's not already
+# Note: R handles this differently than Stata - we'll use as.numeric()
+data_2021 <- data_2021 %>%
+  mutate(
+    cinsiyet = as.numeric(cinsiyet),
+    year = 2021
+  )
+
+# Read 2022 data
+data_2022 <- read_dta("data/dta/data_2022.dta")
+
+# Convert cinsiyet to numeric for 2022 data
+data_2022 <- data_2022 %>%
+  mutate(
+    cinsiyet = as.numeric(cinsiyet),
+    year = 2022
+  )
+
+# Combine datasets
+combined_data <- bind_rows(data_2022, data_2021)
+
+# Create education-based treatment variables
+combined_data <- combined_data %>%
+  mutate(
+    # Treatment 1: Higher than primary vs primary or less
+    treatment1 = case_when(
+      okul_biten_k %in% c(3, 41, 42, 511, 512, 52) ~ 1,
+      okul_biten_k %in% c(1, 2) ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    # Treatment 2: Higher than middle school vs middle school or less
+    treatment2 = case_when(
+      okul_biten_k %in% c(41, 42, 511, 512, 52) ~ 1,
+      okul_biten_k %in% c(1, 2, 3) ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    # Treatment 3: Higher education vs high school or less
+    treatment3 = case_when(
+      okul_biten_k %in% c(511, 512, 52) ~ 1,
+      okul_biten_k %in% c(1, 2, 3, 41, 42) ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    # Generate years of schooling
+    yrs_school = case_when(
+      okul_biten_k == 1 & okur_yazar == 1 ~ 2,
+      okul_biten_k == 2 ~ 5,
+      okul_biten_k == 3 ~ 8,
+      okul_biten_k %in% c(41, 42) ~ 11,
+      okul_biten_k %in% c(511, 512) ~ 15,
+      okul_biten_k == 52 ~ 17,
+      TRUE ~ NA_real_
+    ),
+    
+    # Create gender dummy (1 if male)
+    gender = as.numeric(cinsiyet == 1),
+    
+    # Convert wages to real terms (2021 as base year)
+    # CPI2022/CPI2021 = 1.72
+    gelir_gecenay_k = ifelse(year == 2022, 
+                            gelir_gecenay_k/1.72, 
+                            gelir_gecenay_k),
+    
+    # Calculate hourly wages
+    hourly_wage = gelir_gecenay_k/(esas_fiili * 4.3),
+    log_hourly_wage = log(hourly_wage)
+  )
+
+# Filter for wage and casual workers with positive earnings
+# and working age population (18-65)
+combined_data <- combined_data %>%
+  filter(
+    isteki_durum_k %in% c(11, 12),
+    gelir_gecenay_k > 0,
+    between(yas, 18, 65)
+  )
+
+# Save the prepared dataset
+write_dta(combined_data, "data/dta/combined_data.dta")
+
+# Read the Stata dataset
+combined_data <- read_dta("data/combined_data.dta")
+
+# Convert haven_labelled variables to regular R formats
+# This step is important because Stata's labelled variables are handled differently in R
+combined_data <- combined_data %>%
+  mutate(across(where(is.labelled), ~as.vector(.x)))
+
+# The as.vector() function removes the Stata labels while preserving the values
+# This makes the data more compatible with standard R functions
+
+# Save as R's native RDS format
+saveRDS(combined_data, "data/combined_data.rds")
+
+```
+
+```{r}
+
+
+# Code for DAG
+```
+
+## Directed Acyclic Graph (DAG)
+
+We use DAG for plotting the associations between various co-varites and our outcome variable, earnings.
