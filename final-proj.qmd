@@ -10,115 +10,84 @@ The theory behind the possible impact of compulsory education on wages is human 
 
 Research describing the relationship between compulsory schooling and individual earnings is not very extensive. However, the relationship between these variables has been studied for a long time. It is possible to mention the work of Angrist and Krueger (1991), where they use compulsory schooling laws to estimate their causal effect on earnings. Furthermore, Harmon and Walker (1995) carried out a similar study, but based on the example of the United Kingdom, and obtained positive and significant results for the implementation of compulsory schooling. Subsequently, Oreopoulos (2006) extended the research beyond the United Kingdom and added to the analysis the cases of the United States, Canada and Ireland, obtaining similar results. Also worth mentioning is the study by Pischke and Von Wachter (2008), which examines the impact of an additional year of compulsory schooling on wages in Germany. However, the results are not consistent with those obtained in the previous studies, but the authors justify this with the specificities of the German case. Finally, Fang et al. (2012) also carried out the same exercise, but in China, and obtained more encouraging results than the other studies mentioned. However, this time the authors identify the impact of other aspects, in particular the rapid economic transformation and the increased demand for educated labour in the country.
 
-## Data Cleaning and Formatting
+## Data Cleaning
+
+1.  Combine 2021 - 2022 Datasets
 
 ```{r}
 
-# Clear workspace
-rm(list = ls())
-
-# Import data using haven package for reading Stata files
-library(haven)
-library(dplyr)
-
-# Read 2021 data
+# Read dta data
 data_2021 <- read_dta("data/dta/data_2021.dta")
-
-# Convert cinsiyet to numeric if it's not already
-# Note: R handles this differently than Stata - we'll use as.numeric()
-data_2021 <- data_2021 %>%
-  mutate(
-    cinsiyet = as.numeric(cinsiyet),
-    year = 2021
-  )
-
-# Read 2022 data
 data_2022 <- read_dta("data/dta/data_2022.dta")
-
-# Convert cinsiyet to numeric for 2022 data
-data_2022 <- data_2022 %>%
-  mutate(
-    cinsiyet = as.numeric(cinsiyet),
-    year = 2022
-  )
 
 # Combine datasets
 combined_data <- bind_rows(data_2022, data_2021)
 
-# Create education-based treatment variables
-combined_data <- combined_data %>%
-  mutate(
-    # Treatment 1: Higher than primary vs primary or less
-    treatment1 = case_when(
-      okul_biten_k %in% c(3, 41, 42, 511, 512, 52) ~ 1,
-      okul_biten_k %in% c(1, 2) ~ 0,
-      TRUE ~ NA_real_
-    ),
-    
-    # Treatment 2: Higher than middle school vs middle school or less
-    treatment2 = case_when(
-      okul_biten_k %in% c(41, 42, 511, 512, 52) ~ 1,
-      okul_biten_k %in% c(1, 2, 3) ~ 0,
-      TRUE ~ NA_real_
-    ),
-    
-    # Treatment 3: Higher education vs high school or less
-    treatment3 = case_when(
-      okul_biten_k %in% c(511, 512, 52) ~ 1,
-      okul_biten_k %in% c(1, 2, 3, 41, 42) ~ 0,
-      TRUE ~ NA_real_
-    ),
-    
-    # Generate years of schooling
-    yrs_school = case_when(
-      okul_biten_k == 1 & okur_yazar == 1 ~ 2,
-      okul_biten_k == 2 ~ 5,
-      okul_biten_k == 3 ~ 8,
-      okul_biten_k %in% c(41, 42) ~ 11,
-      okul_biten_k %in% c(511, 512) ~ 15,
-      okul_biten_k == 52 ~ 17,
-      TRUE ~ NA_real_
-    ),
-    
-    # Create gender dummy (1 if male)
-    gender = as.numeric(cinsiyet == 1),
-    
-    # Convert wages to real terms (2021 as base year)
-    # CPI2022/CPI2021 = 1.72
-    gelir_gecenay_k = ifelse(year == 2022, 
-                            gelir_gecenay_k/1.72, 
-                            gelir_gecenay_k),
-    
-    # Calculate hourly wages
-    hourly_wage = gelir_gecenay_k/(esas_fiili * 4.3),
-    log_hourly_wage = log(hourly_wage)
-  )
-
-# Filter for wage and casual workers with positive earnings
-# and working age population (18-65)
-combined_data <- combined_data %>%
-  filter(
-    isteki_durum_k %in% c(11, 12),
-    gelir_gecenay_k > 0,
-    between(yas, 18, 65)
-  )
-
-# Save the prepared dataset
-write_dta(combined_data, "data/dta/combined_data.dta")
-
-
-# Convert haven_labelled variables to regular R formats
-# This step is important because Stata's labelled variables are handled differently in R
-combined_data <- combined_data %>%
-  mutate(across(where(is.labelled), ~as.vector(.x)))
-
-# The as.vector() function removes the Stata labels while preserving the values
-# This makes the data more compatible with standard R functions
-
-# Save as R's native RDS format
+# Save it as RDS
 saveRDS(combined_data, "data/combined_data.rds")
 
 ```
+
+2.  Rename our variables to English
+
+```{r}
+
+# first rename the variables: 
+# yas->age, medeni_durum->marital_status, ibbs_2->region, cinsiyet->gender
+...
+
+
+```
+
+## Feature Engineering
+
+1.  Encode some continues variables to categorical
+
+```{r}
+
+# now make the marital_status, region and age categorical variables
+...
+
+
+```
+
+2.  Create log_hourly_wage and treatment variables for compulsory schooling
+
+```{r}
+
+# now create log_hourly_wage variable
+...
+
+# then lets create treatment variables for individuals effected by compulsory schooling policy
+...
+
+
+```
+
+## Exploratory Data Analysis (EDA)
+
+1.  Lets see the distribution of log hourly wages
+
+```{r}
+
+# ggplot for historgram
+
+
+
+```
+
+2.  Lets see the how many people are effected by compulsory schooling policy change
+
+```{r}
+
+# now create log_hourly_wage variable
+...
+
+
+
+```
+
+## 
 
 ## Directed Acyclic Graph (DAG)
 
@@ -176,25 +145,7 @@ ggdag_classic(dag, node_size=10) +
 
 ## 
 
-## Exploratory Data Analysis (EDA)
-
-```{r}
-
-# Add ggplot for explanatory variables and outcome variable
-
-# 1. Age - 2 plots side by side - histogram for age frequency 
-
-# 2. Marital Status - Pie Chart for each category 
-
-# 3. Gender - Bar Chart with numbers
-
-# 4. Region - Map of Turkey with each region annotated
-
-# 5. Earnings - Histogram for earnings frequency
-
-```
-
-## Feature Engineering
+## 
 
 ```{r}
 
@@ -211,7 +162,7 @@ library(fastDummies) # For creating dummy variables
 
 
 ################################################################################
-# Create Instrument Variables 
+# Create Policy Variables
 ################################################################################
 
 # Create education reform exposure variables based on birth year
@@ -272,7 +223,7 @@ saveRDS(combined_data, "data/analyzed_data.rds")
 
 ```
 
-## Creating Training & Testing Data  
+## Splitting Training & Testing Data  
 
 ```{r}
 
@@ -311,6 +262,64 @@ turkey_test %>%
             mean_sell_price = mean(selling_price),
             sd_sell_price = sd(selling_price))
 ```
+
+## Training Machine Learning Models
+
+In this section, we will employ both regression and classification models and measure their performances.\
+This process will allow us to find out the best performing model so that we can improve on that.
+
+### Classification Model
+
+First we employ a binary classification model for predicting weather some is *employed* or *unemployed* \
+This
+
+```{r}
+
+# First
+
+# Save processed dataset if needed
+saveRDS(combined_data, "data/analyzed_data.rds")
+
+```
+
+#### Performance Measurements
+
+```{r}
+
+# First
+
+# Save processed dataset if needed
+saveRDS(combined_data, "data/analyzed_data.rds")
+
+```
+
+### Regression Model
+
+Now we employ linear & polynomial regression models for predicting the log hour earning of a employed individual.
+
+```{r}
+
+# First
+
+# Save processed dataset if needed
+saveRDS(combined_data, "data/analyzed_data.rds")
+
+```
+
+#### Performance Measurements
+
+```{r}
+
+# First
+
+# Save processed dataset if needed
+saveRDS(combined_data, "data/analyzed_data.rds")
+
+```
+
+### 
+
+## Conclusion
 
 ## References
 
