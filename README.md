@@ -27,6 +27,7 @@ git checkout -b <your-branch-name>
 git add .
 git commit -m "your message here"
 git push
+git merge?
 
 # then yagiz will merge them together
 ``` 

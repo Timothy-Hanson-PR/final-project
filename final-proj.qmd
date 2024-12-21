@@ -1,0 +1,11 @@
+# Effects of Increased Compulsory Schooling Policy on Earnings
+
+## Introduction
+
+Compulsory schooling mandate of Turkey has been increased from 8 to 12 years in 2012. This policy change has impacted \<some_number\> of people when enacted. At the time, the policy was challenged by many families who argued that their children would not benefit from this additional years of education. They argued that their sons are better off working at a earlier age to gain *on-the-job* *training* which would earn them more money compared to additional schooling. Similarly these families argued that their daughters should marry and start a family instead of having education. While education and earnings have a multifaceted relationship, we investigate the causal aspects of this relationship using compulsory schooling policy change as an explanatory variable.
+
+## Literature Review
+
+\<Joel\>
+
+## Data Cleaning and Formatting
