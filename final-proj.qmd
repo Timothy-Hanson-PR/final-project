@@ -10,9 +10,25 @@ The theory behind the possible impact of compulsory education on wages is human 
 
 Research describing the relationship between compulsory schooling and individual earnings is not very extensive. However, the relationship between these variables has been studied for a long time. It is possible to mention the work of Angrist and Krueger (1991), where they use compulsory schooling laws to estimate their causal effect on earnings. Furthermore, Harmon and Walker (1995) carried out a similar study, but based on the example of the United Kingdom, and obtained positive and significant results for the implementation of compulsory schooling. Subsequently, Oreopoulos (2006) extended the research beyond the United Kingdom and added to the analysis the cases of the United States, Canada and Ireland, obtaining similar results. Also worth mentioning is the study by Pischke and Von Wachter (2008), which examines the impact of an additional year of compulsory schooling on wages in Germany. However, the results are not consistent with those obtained in the previous studies, but the authors justify this with the specificities of the German case. Finally, Fang et al. (2012) also carried out the same exercise, but in China, and obtained more encouraging results than the other studies mentioned. However, this time the authors identify the impact of other aspects, in particular the rapid economic transformation and the increased demand for educated labour in the country.
 
+### Loading Libraries
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(gridExtra) 
+library(tidymodels)
+library(tidyverse)
+library(here)
+library(readr)
+library(rsample)
+library(recipes)     
+library(workflows)   
+
+```
+
 ## Data Cleaning
 
-1.  Combine 2021 - 2022 Datasets
+1.  Combine 2021 - 2022 Data sets
 
 ```{r}
 
@@ -21,10 +37,10 @@ data_2021 <- read_dta("data/dta/data_2021.dta")
 data_2022 <- read_dta("data/dta/data_2022.dta")
 
 # Combine datasets
-combined_data <- bind_rows(data_2022, data_2021)
+earnings_data <- bind_rows(data_2022, data_2021)
 
 # Save it as RDS
-saveRDS(combined_data, "data/combined_data.rds")
+saveRDS(earnings_data, "data/combined_data.rds")
 
 ```
 
@@ -33,61 +49,291 @@ saveRDS(combined_data, "data/combined_data.rds")
 ```{r}
 
 # first rename the variables: 
-# yas->age, medeni_durum->marital_status, ibbs_2->region, cinsiyet->gender
-...
+# yas -> age, medeni_durum -> marital_status, ibbs_2 -> region, cinsiyet -> gender
 
-
+earnings_data <- earnings_data %>%
+  rename(
+    year = referans_yil,
+    age = yas,                    
+    marital_status = medeni_durum,
+    region = ibbs_2,              
+    gender = cinsiyet,
+    education_level = okul_biten_k,
+    monthly_income = gelir_gecenay_k,
+    working_hours = esas_fiili
+  )
 ```
 
 ## Feature Engineering
 
-1.  Encode some continues variables to categorical
+#### Encoding Categorical Variables
 
 ```{r}
 
 # now make the marital_status, region and age categorical variables
-...
 
+# Transform the data with proper categorical variables
+earnings_data <- earnings_data %>%
+  mutate(
+    # Convert marital status to a factor with descriptive levels
+    marital_status = factor(marital_status,
+      levels = c(1, 2, 3, 4),
+      labels = c("Never married", "Married", "Divorced", "Widowed")
+    ),
+    
+    # Convert gender to a factor 
+    gender = factor(gender,
+      levels = c(1, 2),
+      labels = c("female", "male")
+    ),
+    
+    # Convert region to a factor
+    # Note: Using NUTS2 regional classification for Turkey
+    region = factor(region,
+      levels = c(
+        "TR10", "TR21", "TR22", "TR31", "TR32", "TR33",
+        "TR41", "TR42", "TR51", "TR52", "TR61", "TR62",
+        "TR63", "TR71", "TR72", "TR81", "TR82", "TR83",
+        "TR90", "TRA1", "TRA2", "TRB1", "TRB2", "TRC1",
+        "TRC2", "TRC3"
+      ),
+      labels = c(
+        "Istanbul", "Tekirdag", "Balikesir", "Izmir", "Aydin", "Manisa",
+        "Bursa", "Kocaeli", "Ankara", "Konya", "Antalya", "Adana",
+        "Hatay", "Kirikkale", "Kayseri", "Zonguldak", "Kastamonu",
+        "Samsun", "Trabzon", "Erzurum", "Agri", "Malatya", "Van",
+        "Gaziantep", "Sanliurfa", "Mardin"
+      )
+    ),
+    
+    # Create age groups in meaningful intervals
+    # First create the categories, then convert to factor
+    age_sq = age**2,
+    age_group = cut(age,
+      breaks = c(17, 25, 35, 45, 55, 65),
+      labels = c("18-25", "26-35", "36-45", "46-55", "56-65"),
+      include.lowest = TRUE
+    )
+  )
+
+# Check the structure of our categorical variables
+(
+  str(earnings_data[c("marital_status", "region", "age_group", "gender")])  
+)
+
+
+# See the distribution of our new categorical variables
+(
+  summary(earnings_data[c("marital_status", "region", "age_group", "gender")])  
+)
 
 ```
 
-2.  Create log_hourly_wage and treatment variables for compulsory schooling
+#### Creating Log_Hourly_Wage Outcome Variable
 
 ```{r}
 
-# now create log_hourly_wage variable
-...
+# Calculate wages and clean the data of NA/infinite values
+earnings_data <- earnings_data %>%
+  # First calculate wages with inflation adjustment
+  mutate(
+    real_monthly_income = case_when(
+      year == 2022 ~ monthly_income / 1.72,  # Adjust 2022 wages to 2021 prices
+      year == 2021 ~ monthly_income,         # Keep 2021 wages as is
+      TRUE ~ NA_real_                        # Handle any unexpected years
+    ),
+    
+    # Calculate hourly wage
+    real_hourly_wage = real_monthly_income / (working_hours * 4.3),
+    
+    # Calculate log of hourly wage
+    log_hourly_wage = log(real_hourly_wage)
+  ) %>%
+  # Now remove problematic cases
+  filter(
+    !is.na(log_hourly_wage),     # Remove NA values
+    !is.infinite(log_hourly_wage) # Remove infinite values
+  )
+
+
+
+# Create a visualization to show the cleaned wage distribution
+ggplot(earnings_data, aes(x = log_hourly_wage)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  labs(
+    title = "Distribution of Log Hourly Wages After Cleaning",
+    subtitle = "All NA and infinite values removed",
+    x = "Log Hourly Wage",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+2.  lets create treatment variables for compulsory schooling
+
+```{r}
 
 # then lets create treatment variables for individuals effected by compulsory schooling policy
-...
-
+earnings_data <- earnings_data %>%
+  mutate(
+    # Treatment1: At least middle school (8 years) vs less education
+    treatment1 = case_when(
+      education_level %in% c(3, 41, 42, 511, 512, 52) ~ 1,  # 8+ years of education
+      education_level %in% c(1, 2) ~ 0,                     # Less than 8 years
+      TRUE ~ NA_real_                                       # Other cases
+    ),
+    
+    # Treatment2: At least high school vs less education
+    treatment2 = case_when(
+      education_level %in% c(41, 42, 511, 512, 52) ~ 1,     # High school or more
+      education_level %in% c(1, 2, 3) ~ 0,                  # Less than high school
+      TRUE ~ NA_real_
+    ),
+    
+    # Treatment3: At least university vs less education
+    treatment3 = case_when(
+      education_level %in% c(511, 512, 52) ~ 1,             # University or more
+      education_level %in% c(1, 2, 3, 41, 42) ~ 0,          # Less than university
+      TRUE ~ NA_real_
+    )
+  )
 
 ```
 
 ## Exploratory Data Analysis (EDA)
 
-1.  Lets see the distribution of log hourly wages
+### Filtering NA's
+
+1.  filter unnecessary items & NA items
 
 ```{r}
 
-# ggplot for historgram
-
+# filter intermediave variables
+earnings_data <- earnings_data %>%
+  select(
+    year,
+    age,        
+    age_sq,
+    age_group,
+    marital_status,
+    region,    
+    gender,
+    education_level,
+    working_hours,
+    monthly_income,
+    log_hourly_wage,
+    treatment1,
+    treatment2,
+    treatment3,
+  )
 
 
 ```
 
-2.  Lets see the how many people are effected by compulsory schooling policy change
+4.  Let's examine if the missing values are related to any particular groups in our data:
+
+```{r}
+# Check if missing values are more common in certain groups
+earnings_data %>%
+  group_by(gender) %>%
+  summarize(
+    missing_rate = mean(is.na(log_hourly_wage)),
+    total_count = n()
+  )
+
+# Check by education level
+earnings_data %>%
+  group_by(education_level) %>%
+  summarize(
+    missing_rate = mean(is.na(log_hourly_wage)),
+    total_count = n()
+  )
+
+
+# Compare key statistics before and after NA removal
+compare_stats <- function(data_before, data_after) {
+  # Function to calculate summary statistics
+  get_stats <- function(data) {
+    data %>%
+      summarize(
+        mean_age = mean(age, na.rm = TRUE),
+        prop_male = mean(gender == "female", na.rm = TRUE),
+        mean_working_hours = mean(working_hours, na.rm = TRUE)
+      )
+  }
+  
+  before_stats <- get_stats(data_before)
+  after_stats <- get_stats(data_after)
+  
+  # Print comparison
+  print("Summary statistics comparison:")
+  print(bind_rows(
+    before_stats %>% mutate(dataset = "Before NA removal"),
+    after_stats %>% mutate(dataset = "After NA removal")
+  ))
+}
+
+# Run comparison
+compare_stats(earnings_data, earnings_data_clean)
+```
+
+### Plots
 
 ```{r}
 
-# now create log_hourly_wage variable
-...
+# distribution of log hourly wages
+p1 <- ggplot(earnings_data, aes(x = log_hourly_wage)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  geom_vline(aes(xintercept = mean(log_hourly_wage, na.rm = TRUE)), 
+             color = "red", linetype = "dashed") +
+  labs(
+    title = "Distribution of Log Hourly Wages",
+    subtitle = "Red line indicates mean wage",
+    x = "Log Hourly Wage",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+# earnings by education level
+p2 <- ggplot(earnings_data, aes(x = factor(treatment1), y = log_hourly_wage)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(
+    title = "Log Hourly Wages by Education Level",
+    x = "Education Treatment (1 = 8+ years)",
+    y = "Log Hourly Wage"
+  ) +
+  theme_minimal()
+
+# time trends
+p3 <- ggplot(earnings_data, aes(x = log_hourly_wage, fill = factor(year))) +
+  geom_density(alpha = 0.5) +
+  labs(
+    title = "Wage Distribution by Year",
+    x = "Log Hourly Wage",
+    y = "Density",
+    fill = "Year"
+  ) +
+  theme_minimal()
+
+# regional wage variation
+p4 <- earnings_data %>%
+  group_by(region) %>%
+  summarise(mean_wage = mean(log_hourly_wage, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(region, mean_wage), y = mean_wage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(
+    title = "Average Log Hourly Wage by Region",
+    x = "Region",
+    y = "Mean Log Hourly Wage"
+  ) +
+  theme_minimal()
 
 
+# Arrange plots in a grid
+grid.arrange(p1, p2, p3, p4, ncol = 2)
 
 ```
-
-## 
 
 ## Directed Acyclic Graph (DAG)
 
@@ -143,166 +389,167 @@ ggdag_classic(dag, node_size=10) +
 
 ```
 
-## 
+## Employing Machine Learning Models
 
-## 
+In this section, we will employ 2 machine learning models: Ordinary Least Square (OLS) & Double Machine Learning (DML).
 
-```{r}
+**Idea:**
 
-# Purpose: Create instrument variables and prepare control variables for analysis
+1.  We will first train a OLS model to predict the earnings, measure its performance and investigate the interpretability with regards to associations highlighted in DAG
+2.  Then we will employ a modern DML model that promise to be more interpretable than OLS. We will compare the performance and causal estimates compared to baseline OLS model.
 
-# Load required libraries
-library(haven)      # For reading Stata files
-library(dplyr)      # For data manipulation
-library(tidyr)      # For data cleaning
-library(fastDummies) # For creating dummy variables
-
-
-# Load the cleaned and combined data
-
-
-################################################################################
-# Create Policy Variables
-################################################################################
-
-# Create education reform exposure variables based on birth year
-combined_data <- combined_data %>%
-  mutate(
-    # Treatment1: 1997 education reform (exposure if born after 1986)
-    # This creates a binary indicator for those affected by the reform
-    reform1997 = as.numeric(dogum_yil > 1986),
-    
-    # Treatment2: 2013 education reform (exposure if born after 2001)
-    # Similar binary indicator for the 2013 reform
-    reform2013 = as.numeric(dogum_yil > 2001),
-    
-    # Calculate university entry year (age 18) for each individual
-    univ_entry_year = dogum_yil + 18
-  )
-
-
-################################################################################
-# Control Variables
-################################################################################
-
-# Create region dummies
-# In R, we'll first ensure ibbs_2 is properly factored, then create dummies
-combined_data <- combined_data %>%
-  mutate(
-    region = as.factor(ibbs_2)
-  )
-
-# Create dummy variables for marital status
-# We'll use dummy_cols from fastDummies package for this
-combined_data <- dummy_cols(
-  combined_data,
-  select_columns = "medeni_durum",
-  remove_selected_columns = FALSE,
-  remove_first_dummy = TRUE
-)
-
-# Create birth year fixed effects
-combined_data <- dummy_cols(
-  combined_data,
-  select_columns = "dogum_yil",
-  remove_selected_columns = FALSE,
-  remove_first_dummy = TRUE
-)
-
-# Create a list of control variables for use in models
-# Note: In R, we'll create this differently than Stata's global macro
-control_vars <- c(
-  "region",              # Region fixed effects
-  names(combined_data)[grep("^medeni_durum_", names(combined_data))],  # Marital status dummies
-  "dogum_yil",          # Birth year
-  names(combined_data)[grep("^dogum_yil_", names(combined_data))]      # Birth year dummies
-)
-
-# Save processed dataset if needed
-saveRDS(combined_data, "data/analyzed_data.rds")
-
-```
-
-## Splitting Training & Testing Data  
+### Splitting Training & Testing Data
 
 ```{r}
 
-# Purpose: Create Training/Testing data folds to be used by machine learning model
-
-library(tidymodels)
-library(tidyverse)
-library(here)
-library(readr)
-
-turkey_data <- read_csv("Downloads/data.csv")
+# Create Training/Testing data folds to be used by machine learning model
 
 # Create a data split object, 
-turkey_split <- initial_split(
-  turkey_data, 
+earnings_split <- initial_split(
+  earnings_data_clean, 
   prop = 0.75, 
   strata = log_hourly_wage
 )
 
 # Create the training & testing data
-turkey_training <- training(turkey_split)
-turkey_test <- testing(turkey_split)
+earnings_training <- training(earnings_split)
+earnings_test <- testing(earnings_split)
 
 
-# Distribution of selling_price in training data:
-turkey_training %>% 
-  summarize(min_sell_price = min(selling_price),
-            max_sell_price = max(selling_price),
-            mean_sell_price = mean(selling_price),
-            sd_sell_price = sd(selling_price))
 
-# Distribution of selling_price in test data
-turkey_test %>% 
-  summarize(min_sell_price = min(selling_price),
-            max_sell_price = max(selling_price),
-            mean_sell_price = mean(selling_price),
-            sd_sell_price = sd(selling_price))
-```
+# Create the split as specified
+set.seed(123)      # For reproducibility
+earnings_split <- initial_split(
+  earnings_data_clean, 
+  prop = 0.75,     # 75% for training
+  strata = log_hourly_wage  # Stratify by our outcome variable
+)
 
-## Training Machine Learning Models
+# Create training and testing datasets
+earnings_training <- training(earnings_split)
+earnings_test <- testing(earnings_split)
 
-In this section, we will employ both regression and classification models and measure their performances.\
-This process will allow us to find out the best performing model so that we can improve on that.
-
-### Classification Model
-
-First we employ a binary classification model for predicting weather some is *employed* or *unemployed* \
-This
-
-```{r}
-
-# First
-
-# Save processed dataset if needed
-saveRDS(combined_data, "data/analyzed_data.rds")
 
 ```
 
-#### Performance Measurements
+#### Check Balanced Distribution
 
 ```{r}
 
-# First
+# Let's create visualizations to compare the distributions
+# We'll create three informative plots:
 
-# Save processed dataset if needed
-saveRDS(combined_data, "data/analyzed_data.rds")
+# 1. Density plot comparing log hourly wage distributions
+p1 <- ggplot() +
+  geom_density(data = earnings_training, 
+               aes(x = log_hourly_wage, color = "Training"),
+               alpha = 0.5) +
+  geom_density(data = earnings_test,
+               aes(x = log_hourly_wage, color = "Testing"),
+               alpha = 0.5) +
+  labs(title = "Distribution of Log Hourly Wages",
+       subtitle = "Comparing Training and Testing Sets",
+       x = "Log Hourly Wage",
+       y = "Density",
+       color = "Dataset") +
+  theme_minimal() +
+  scale_color_manual(values = c("Training" = "blue", "Testing" = "red"))
+
+# 2. Box plots for a different perspective
+p2 <- bind_rows(
+  mutate(earnings_training, Set = "Training"),
+  mutate(earnings_test, Set = "Testing")
+) %>%
+  ggplot(aes(x = Set, y = log_hourly_wage, fill = Set)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Log Hourly Wages by Dataset",
+       subtitle = "Box Plot Comparison",
+       y = "Log Hourly Wage",
+       x = "") +
+  theme_minimal()
+
+# Let's also create a numerical summary
+summary_stats <- bind_rows(
+  earnings_training %>%
+    summarise(
+      Dataset = "Training",
+      n = n(),
+      Mean = mean(log_hourly_wage),
+      SD = sd(log_hourly_wage),
+      Median = median(log_hourly_wage),
+      Q1 = quantile(log_hourly_wage, 0.25),
+      Q3 = quantile(log_hourly_wage, 0.75)
+    ),
+  earnings_test %>%
+    summarise(
+      Dataset = "Testing",
+      n = n(),
+      Mean = mean(log_hourly_wage),
+      SD = sd(log_hourly_wage),
+      Median = median(log_hourly_wage),
+      Q1 = quantile(log_hourly_wage, 0.25),
+      Q3 = quantile(log_hourly_wage, 0.75)
+    )
+)
+
+# Print numerical summaries
+print("Summary Statistics for Training and Testing Sets:")
+print(summary_stats)
+
+# Display both plots side by side
+gridExtra::grid.arrange(p1, p2, ncol = 2)
 
 ```
 
 ### Regression Model
 
-Now we employ linear & polynomial regression models for predicting the log hour earning of a employed individual.
+Now we employ a linear regression model for predicting the log hour earning of a employed individual.
 
 ```{r}
 
-# First
+# First, let's create our model specification
+# We'll use linear regression with standard OLS estimation
+lm_model <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
 
-# Save processed dataset if needed
-saveRDS(combined_data, "data/analyzed_data.rds")
+# Next, let's create a recipe for our feature engineering
+# This is where we specify how we want to prepare our variables
+wage_recipe <- recipe(log_hourly_wage ~ age + age_sq + gender + marital_status + 
+                     region + education_level + working_hours,
+                     data = earnings_training) %>%
+  # Convert categorical variables to dummy variables
+  step_dummy(all_nominal_predictors()) %>%
+  # Center and scale numeric predictors
+  step_normalize(all_numeric_predictors()) %>%
+  # Remove any variables with zero variance
+  step_zv(all_predictors())
+
+
+# Create a workflow that combines our model and recipe
+wage_workflow <- workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(wage_recipe)
+
+# Fit the model using our training data
+wage_fit <- wage_workflow %>%
+  fit(data = earnings_training)
+
+# Let's examine the model results
+model_results <- wage_fit %>%
+  extract_fit_engine() %>%
+  summary()
+
+# Print the model summary
+print(model_results)
+
+# Let's also look at the most important coefficients
+tidy_results <- tidy(wage_fit) %>%
+  arrange(desc(abs(estimate)))  # Sort by absolute value of coefficient
+
+# Print the top 10 most influential variables
+print("Top 10 most influential predictors:")
+print(head(tidy_results, 10))
 
 ```
 
@@ -310,16 +557,58 @@ saveRDS(combined_data, "data/analyzed_data.rds")
 
 ```{r}
 
-# First
+# We will measure performance by employing trained model agains test data
+# Make predictions on test set
+wage_predictions <- predict(wage_fit, earnings_test_clean) %>%
+  bind_cols(earnings_test_clean)
 
-# Save processed dataset if needed
-saveRDS(combined_data, "data/analyzed_data.rds")
+# Calculate performance metrics
+model_metrics <- wage_predictions %>%
+  metrics(truth = log_hourly_wage, estimate = .pred)
+
+# Print metrics
+print("Model Performance Metrics:")
+print(model_metrics)
+
+# Create a scatter plot of predicted vs actual values
+ggplot(wage_predictions, aes(x = log_hourly_wage, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(color = "red", linetype = "dashed") +
+  labs(
+    title = "Predicted vs Actual Log Hourly Wages",
+    x = "Actual Log Hourly Wage",
+    y = "Predicted Log Hourly Wage"
+  ) +
+  theme_minimal()
+
+```
+
+### Double Machine Learning Model
+
+Now we employ a DML model for predicting the log hour earning of a employed individual.
+
+```{r}
+
+# build linear regression model
+...
+
+
+```
+
+#### Performance Measurements
+
+```{r}
+
+# We will measure performance by employing trained model agains test data
+...
 
 ```
 
 ### 
 
 ## Conclusion
+
+...
 
 ## References
 
